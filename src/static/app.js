@@ -1,30 +1,58 @@
+
 document.addEventListener("DOMContentLoaded", () => {
   const activitiesList = document.getElementById("activities-list");
-  const activitySelect = document.getElementById("activity");
-  const signupForm = document.getElementById("signup-form");
-  const messageDiv = document.getElementById("message");
+  const categoryFilter = document.getElementById("category-filter");
+  const sortFilter = document.getElementById("sort-filter");
+  const searchFilter = document.getElementById("search-filter");
 
-  // Function to fetch activities from API
-  async function fetchActivities() {
-    try {
-      const response = await fetch("/activities");
-      const activities = await response.json();
+  let allActivities = {};
 
-      // Clear loading message
-      activitiesList.innerHTML = "";
+  // Function to render activities with filters
+  function renderActivities() {
+    // Get filter values
+    const category = categoryFilter ? categoryFilter.value : "";
+    const sortBy = sortFilter ? sortFilter.value : "name";
+    const search = searchFilter ? searchFilter.value.trim().toLowerCase() : "";
 
-      // Populate activities list
-      Object.entries(activities).forEach(([name, details]) => {
-        const activityCard = document.createElement("div");
-        activityCard.className = "activity-card";
+    // Convert activities to array for filtering/sorting
+    let filtered = Object.entries(allActivities);
 
-        const spotsLeft =
-          details.max_participants - details.participants.length;
+    // Filter by category
+    if (category) {
+      filtered = filtered.filter(([_, details]) => details.category === category);
+    }
 
-        // Create participants HTML with delete icons instead of bullet points
-        const participantsHTML =
-          details.participants.length > 0
-            ? `<div class="participants-section">
+    // Filter by search
+    if (search) {
+      filtered = filtered.filter(([name, details]) =>
+        name.toLowerCase().includes(search) ||
+        details.description.toLowerCase().includes(search) ||
+        (details.category && details.category.toLowerCase().includes(search))
+      );
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      if (sortBy === "name") {
+        return a[0].localeCompare(b[0]);
+      } else if (sortBy === "date") {
+        return new Date(a[1].date) - new Date(b[1].date);
+      }
+      return 0;
+    });
+
+    // Clear list and dropdown
+    activitiesList.innerHTML = "";
+  // No global activity select dropdown
+
+    // Render filtered activities
+    filtered.forEach(([name, details]) => {
+      const activityCard = document.createElement("div");
+      activityCard.className = "activity-card";
+      const spotsLeft = details.max_participants - details.participants.length;
+      const participantsHTML =
+        details.participants.length > 0
+          ? `<div class="participants-section">
               <h5>Participants:</h5>
               <ul class="participants-list">
                 ${details.participants
@@ -35,31 +63,62 @@ document.addEventListener("DOMContentLoaded", () => {
                   .join("")}
               </ul>
             </div>`
-            : `<p><em>No participants yet</em></p>`;
-
-        activityCard.innerHTML = `
-          <h4>${name}</h4>
-          <p>${details.description}</p>
-          <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
-          <div class="participants-container">
-            ${participantsHTML}
-          </div>
-        `;
-
-        activitiesList.appendChild(activityCard);
-
-        // Add option to select dropdown
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        activitySelect.appendChild(option);
+          : `<p><em>No participants yet</em></p>`;
+      activityCard.innerHTML = `
+        <h4>${name}</h4>
+        <p class="activity-desc">${details.description}</p>
+        <p><strong>Category:</strong> ${details.category || ""}</p>
+        <p><strong>Date:</strong> ${details.date || ""}</p>
+        <p><strong>Schedule:</strong> ${details.schedule}</p>
+        <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+        <button class="register-btn" data-activity="${name}">Register Student</button>
+        <div class="participants-container">
+          ${participantsHTML}
+        </div>
+      `;
+      activitiesList.appendChild(activityCard);
+      // Make the whole card clickable to select activity
+      activityCard.style.cursor = "pointer";
+      // No card click-to-select logic needed
+    });
+    // Add event listeners to delete buttons
+    document.querySelectorAll(".delete-btn").forEach((button) => {
+      button.addEventListener("click", handleUnregister);
+    });
+    // Add event listeners to register buttons
+    document.querySelectorAll(".register-btn").forEach((button) => {
+      button.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const activity = button.getAttribute("data-activity");
+        let email = prompt("Enter student email to register:");
+        if (!email) return;
+        email = email.trim();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+          alert("Please enter a valid email address.");
+          return;
+        }
+        try {
+          const response = await fetch(`/activities/${encodeURIComponent(activity)}/signup?email=${encodeURIComponent(email)}`, { method: "POST" });
+          const result = await response.json();
+          if (response.ok) {
+            alert(result.message);
+            fetchActivities();
+          } else {
+            alert(result.detail || "An error occurred");
+          }
+        } catch (error) {
+          alert("Failed to sign up. Please try again.");
+        }
       });
+    });
+  }
 
-      // Add event listeners to delete buttons
-      document.querySelectorAll(".delete-btn").forEach((button) => {
-        button.addEventListener("click", handleUnregister);
-      });
+  // Function to fetch activities from API
+  async function fetchActivities() {
+    try {
+      const response = await fetch("/activities");
+      allActivities = await response.json();
+      renderActivities();
     } catch (error) {
       activitiesList.innerHTML =
         "<p>Failed to load activities. Please try again later.</p>";
@@ -72,88 +131,30 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = event.target;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
-
     try {
       const response = await fetch(
-        `/activities/${encodeURIComponent(
-          activity
-        )}/unregister?email=${encodeURIComponent(email)}`,
-        {
-          method: "DELETE",
-        }
+        `/activities/${encodeURIComponent(activity)}/unregister?email=${encodeURIComponent(email)}`,
+        { method: "DELETE" }
       );
-
       const result = await response.json();
-
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
-
-        // Refresh activities list to show updated participants
+        alert(result.message);
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        alert(result.detail || "An error occurred");
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
     } catch (error) {
-      messageDiv.textContent = "Failed to unregister. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      alert("Failed to unregister. Please try again.");
       console.error("Error unregistering:", error);
     }
   }
 
-  // Handle form submission
-  signupForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  // No global signup form submission logic needed
 
-    const email = document.getElementById("email").value;
-    const activity = document.getElementById("activity").value;
-
-    try {
-      const response = await fetch(
-        `/activities/${encodeURIComponent(
-          activity
-        )}/signup?email=${encodeURIComponent(email)}`,
-        {
-          method: "POST",
-        }
-      );
-
-      const result = await response.json();
-
-      if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
-        signupForm.reset();
-
-        // Refresh activities list to show updated participants
-        fetchActivities();
-      } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
-      }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
-    } catch (error) {
-      messageDiv.textContent = "Failed to sign up. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
-      console.error("Error signing up:", error);
-    }
-  });
+  // Add filter event listeners
+  if (categoryFilter) categoryFilter.addEventListener("change", renderActivities);
+  if (sortFilter) sortFilter.addEventListener("change", renderActivities);
+  if (searchFilter) searchFilter.addEventListener("input", renderActivities);
 
   // Initialize app
   fetchActivities();
